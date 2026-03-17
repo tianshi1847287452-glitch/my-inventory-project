@@ -128,26 +128,49 @@
     }
   }
 
+  // Token刷新状态管理（防止并发刷新）
+  let isRefreshing = false;
+  let refreshPromise = null;
+
   async function refreshToken() {
+    // 如果已经在刷新中，等待现有的刷新完成
+    if (isRefreshing && refreshPromise) {
+      return refreshPromise;
+    }
+    
     const refresh = TokenManager.getRefreshToken();
     if (!refresh) return false;
     
-    try {
-      const response = await fetch(`${API_CONFIG.baseURL}/auth/refresh/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh })
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        TokenManager.setToken(data.access);
-        return true;
+    isRefreshing = true;
+    refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${API_CONFIG.baseURL}/auth/refresh/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          TokenManager.setToken(data.access);
+          // 重要：保存新的refresh token（因为后端配置了ROTATE_REFRESH_TOKENS）
+          if (data.refresh) {
+            TokenManager.setRefreshToken(data.refresh);
+          }
+          return true;
+        }
+      } catch (error) {
+        console.error('刷新Token失败:', error);
       }
-    } catch (error) {
-      console.error('刷新Token失败:', error);
+      return false;
+    })();
+    
+    try {
+      return await refreshPromise;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
     }
-    return false;
   }
 
   // ==================== 文件上传请求方法 ====================
